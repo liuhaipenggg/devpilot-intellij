@@ -5,6 +5,7 @@ import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
@@ -12,6 +13,7 @@ import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
+import com.zhongan.devpilot.completions.autoimport.handler.AutoImportHandler;
 import com.zhongan.devpilot.enums.ChatActionTypeEnum;
 import com.zhongan.devpilot.enums.EditorActionEnum;
 import com.zhongan.devpilot.enums.SessionTypeEnum;
@@ -333,6 +335,11 @@ public class DevPilotChatToolWindow {
 
                 textEditor.getContentComponent().requestFocusInWindow();
             });
+            //计算新插入代码的start与endoffset
+            PsiDocumentManager.getInstance(project).commitAllDocuments();
+            int startOffset = ApplicationManager.getApplication().runReadAction((Computable<Integer>) () -> textEditor.getSelectionModel().getSelectionStart());
+            int endOffset = ApplicationManager.getApplication().runReadAction((Computable<Integer>) () -> textEditor.getSelectionModel().getSelectionEnd());
+            autoImport(textEditor, startOffset, endOffset);
         });
     }
 
@@ -352,7 +359,16 @@ public class DevPilotChatToolWindow {
                     PsiDocumentManager.getInstance(project).commitDocument(textEditor.getDocument());
                     CodeStyleManager.getInstance(project).reformatText(psiFile, offset, offset + generatedText.length());
                 }
+                PsiDocumentManager.getInstance(project).commitDocument(textEditor.getDocument());
+                autoImport(textEditor, offset, offset + generatedText.length());
             });
+        });
+    }
+
+    private void autoImport(Editor textEditor, int startOffset, int endOffset) {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            PsiFile fileAfterCompletion = PsiDocumentManager.getInstance(project).getPsiFile(textEditor.getDocument());
+            new AutoImportHandler(startOffset, endOffset, textEditor, fileAfterCompletion).invoke();
         });
     }
 }

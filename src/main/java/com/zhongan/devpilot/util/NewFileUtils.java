@@ -1,5 +1,6 @@
 package com.zhongan.devpilot.util;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -9,13 +10,16 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
 import com.intellij.psi.impl.file.PsiDirectoryFactory;
 import com.zhongan.devpilot.actions.notifications.DevPilotNotification;
+import com.zhongan.devpilot.completions.autoimport.handler.AutoImportHandler;
 import com.zhongan.devpilot.enums.EditorActionEnum;
 import com.zhongan.devpilot.webview.model.CodeReferenceModel;
 
@@ -76,6 +80,7 @@ public class NewFileUtils {
                 PsiFile fileFromText = PsiFileFactory.getInstance(project).createFileFromText(testFileName, fileType, finalGeneratedText);
                 PsiFile createdFile = (PsiFile) testPsiDir.add(fileFromText);
                 FileEditorManager.getInstance(project).openFile(createdFile.getVirtualFile(), true);
+                autoImport(project);
             });
         });
     }
@@ -107,6 +112,7 @@ public class NewFileUtils {
             PsiFile fileFromText = PsiFileFactory.getInstance(project).createFileFromText(finalFileName, fileType, generatedText);
             PsiFile createdFile = (PsiFile) finalSelectedFileDir.add(fileFromText);
             FileEditorManager.getInstance(project).openFile(createdFile.getVirtualFile(), true);
+            autoImport(project);
         });
     }
 
@@ -149,5 +155,21 @@ public class NewFileUtils {
             }
         }
         return psiDirectory;
+    }
+
+    private static void autoImport(Project project) {
+        Editor textEditor = FileEditorManager.getInstance(project).getSelectedTextEditor();
+        if (textEditor == null) return;
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            //获取新建的psifile
+            WriteCommandAction.runWriteCommandAction(textEditor.getProject(), () -> PsiDocumentManager.getInstance(textEditor.getProject()).commitDocument(textEditor.getDocument()));
+            PsiFile fileAfterCompletion = ApplicationManager.getApplication().runReadAction((Computable<PsiFile>) () -> PsiDocumentManager.getInstance(textEditor.getProject()).getPsiFile(textEditor.getDocument()));
+            //获取psifile的offset范围
+            int startOffset = textEditor.getDocument().getLineStartOffset(1);
+            int endOffset = textEditor.getDocument().getLineEndOffset(textEditor.getDocument().getLineCount() - 1);
+            new AutoImportHandler(startOffset, endOffset, textEditor, fileAfterCompletion).invoke();
+            //保存导入的结果
+            WriteCommandAction.runWriteCommandAction(textEditor.getProject(), () -> PsiDocumentManager.getInstance(textEditor.getProject()).commitDocument(textEditor.getDocument()));
+        });
     }
 }
